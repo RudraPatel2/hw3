@@ -16,7 +16,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 CREATE TABLE artist (
   name            VARCHAR(150) NOT NULL,
-  is_individual   BOOLEAN      NOT NULL,
+  is_individual   BOOLEAN      NOT NULL DEFAULT 1,
   PRIMARY KEY (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

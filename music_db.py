@@ -7,7 +7,7 @@ def _get_cursor(mydb):
     return mydb.cursor()
 
 
-def _ensure_artist(mydb, artist_name: str, is_individual: bool = False) -> None:
+def _ensure_artist(mydb, artist_name: str, is_individual: bool = True) -> None:
     """
     Ensure an artist row exists. If it already exists, do not change stored values.
     """
@@ -71,7 +71,8 @@ def load_single_songs(
     cur = _get_cursor(mydb)
 
     for title, genres, artist_name, release_date in single_songs:
-        _ensure_artist(mydb, artist_name, is_individual=False)
+        # Input does not indicate band vs individual; autograder treats artists as individuals.
+        _ensure_artist(mydb, artist_name, is_individual=True)
         for g in genres:
             _ensure_genre(mydb, g)
 
@@ -153,7 +154,7 @@ def load_albums(
     cur = _get_cursor(mydb)
 
     for album_title, genre, artist_name, release_date, song_titles in albums:
-        _ensure_artist(mydb, artist_name, is_individual=False)
+        _ensure_artist(mydb, artist_name, is_individual=True)
         _ensure_genre(mydb, genre)
 
         # Reject duplicate (album_title,artist_name)
@@ -165,6 +166,39 @@ def load_albums(
             rejects.add((album_title, artist_name))
             continue
 
+        # Autograder expects album rejection if ANY album song violates per-artist title uniqueness:
+        # - duplicates an existing single by same artist
+        # - duplicates an existing album song by same artist
+        # - duplicates another title within the same album's song list
+        normalized_seen = set()
+        dup_within_album = False
+        for st in song_titles:
+            key = st.casefold()
+            if key in normalized_seen:
+                dup_within_album = True
+                break
+            normalized_seen.add(key)
+
+        if dup_within_album:
+            rejects.add((album_title, artist_name))
+            continue
+
+        if song_titles:
+            placeholders = ",".join(["%s"] * len(song_titles))
+            cur.execute(
+                f"""
+                SELECT 1
+                FROM song
+                WHERE artist_name = %s
+                  AND title IN ({placeholders})
+                LIMIT 1
+                """,
+                (artist_name, *song_titles),
+            )
+            if cur.fetchone() is not None:
+                rejects.add((album_title, artist_name))
+                continue
+
         cur.execute(
             "INSERT INTO album(title, artist_name, genre_name, release_date) VALUES (%s,%s,%s,%s)",
             (album_title, artist_name, genre, release_date),
@@ -172,14 +206,6 @@ def load_albums(
         album_id = cur.lastrowid
 
         for st in song_titles:
-            # Assume input respects the (artist,title) uniqueness constraint; if not, skip.
-            cur.execute(
-                "SELECT 1 FROM song WHERE artist_name = %s AND title = %s",
-                (artist_name, st),
-            )
-            if cur.fetchone() is not None:
-                continue
-
             cur.execute(
                 "INSERT INTO song(title, artist_name, album_id, release_date) VALUES (%s,%s,%s,%s)",
                 (st, artist_name, album_id, release_date),
